@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Document Analyzer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📄 AI Document Analyzer</h1>
+            <p>Upload a document (PDF, DOCX, or Image) to analyze</p>
+        </header>
+
+        <main>
+            <div class="api-key-section">
+                <label for="apiKeyInput">🔑 API Key</label>
+                <input type="password" id="apiKeyInput" placeholder="Enter your API key">
+            </div>
+
+            <div class="upload-section">
+                <div class="upload-box" id="uploadBox">
+                    <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.tiff,.bmp,.webp" hidden>
+                    <div class="upload-content">
+                        <span class="upload-icon">📁</span>
+                        <p>Drag & drop a file here or <span class="browse-link">browse</span></p>
+                        <small>Supported: PDF, DOCX, PNG, JPG, JPEG, TIFF, BMP, WEBP</small>
+                    </div>
+                </div>
+                <div class="file-info" id="fileInfo" hidden>
+                    <span class="file-name" id="fileName"></span>
+                    <button class="clear-btn" id="clearBtn">✕</button>
+                </div>
+                <button class="analyze-btn" id="analyzeBtn" disabled>Analyze Document</button>
+            </div>
+
+            <div class="loading" id="loading" hidden>
+                <div class="spinner"></div>
+                <p>Analyzing document...</p>
+            </div>
+
+            <div class="result-section" id="resultSection" hidden>
+                <h2>Analysis Results</h2>
+                
+                <div class="result-card">
+                    <h3>📝 Summary</h3>
+                    <p id="summaryText"></p>
+                </div>
+
+                <div class="result-card">
+                    <h3>😊 Sentiment</h3>
+                    <span class="sentiment-badge" id="sentimentBadge"></span>
+                </div>
+
+                <div class="result-card">
+                    <h3>🏷️ Entities</h3>
+                    <div class="entities-grid">
+                        <div class="entity-group">
+                            <h4>👤 Names</h4>
+                            <ul id="namesList"></ul>
+                        </div>
+                        <div class="entity-group">
+                            <h4>📅 Dates</h4>
+                            <ul id="datesList"></ul>
+                        </div>
+                        <div class="entity-group">
+                            <h4>🏢 Organizations</h4>
+                            <ul id="orgsList"></ul>
+                        </div>
+                        <div class="entity-group">
+                            <h4>💰 Amounts</h4>
+                            <ul id="amountsList"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="error-section" id="errorSection" hidden>
+                <div class="error-box">
+                    <span>❌</span>
+                    <p id="errorText"></p>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Powered by Gemini AI</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

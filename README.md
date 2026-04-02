@@ -80,10 +80,8 @@ An intelligent document processing API that extracts, analyses, and summarises c
 ## AI Tools Used
 
 This project was developed with assistance from:
-- **GitHub Copilot** - AI-powered development assistant
-  - Claude Opus 4.5 (for complex architecture and design decisions)
-  - Claude Sonnet 4.5 (for implementation and optimization)
-
+- GitHub Copilot – code suggestions and development support  
+- ChatGPT – planning and testing assistance  
 
 ## Setup Instructions
 

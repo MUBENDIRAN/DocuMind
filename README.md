@@ -384,3 +384,10 @@ curl -X POST https://your-app.example.com/api/document-analyze \
 **Mubendiran K**  
 Rajalakshmi Institute of Technology, Chennai  
 Built as part of **GUVI Hackathon 2026** submission
+
+## 🎥 Project Demo
+
+Watch the full video demo of **DocuMind** below:
+
+🔗 **YouTube Demo:**  
+https://youtu.be/tMJi5EOxsNE

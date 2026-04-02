@@ -202,40 +202,75 @@ The JSON must follow this exact schema:
 }}
 
 Rules:
-- Extract ALL entities of each type present in the text.
-- Do NOT return empty lists unless absolutely no entities exist in that category.
-- Summary must accurately reflect the document's purpose and key facts.
-- Do NOT include any text outside the JSON object.
+- Extract ALL entities of each type present in the text following the rules below
+- Do NOT return empty lists unless absolutely no entities exist in that category
+- Summary must accurately reflect the document's purpose and key facts
+- Do NOT include any text outside the JSON object
+- Be precise and avoid false positives
 
 Entity Extraction Rules:
-- Names: Full person names, authors, signatories.
-- Dates: Valid calendar dates only (see Date Rules below).
-- Organizations: Extract only real organizations such as:
-  - Companies (e.g., "ABC Pvt Ltd", "Google", "Microsoft")
-  - Institutions (e.g., "Harvard University", "Red Cross", "World Bank")
-  - Government bodies (e.g., "Ministry of Finance", "FBI", "Department of Education")
-  
-  Do NOT include:
-  - Industries (e.g., "healthcare", "finance", "banking")
-  - Sectors (e.g., "technology sector", "public sector")
-  - Generic categories (e.g., "companies", "organizations", "financial institutions")
-  
-  Extract meaningful and distinct organizations. Avoid:
-  - Duplicates
-  - Overly generic terms like "organizations" or "industry"
-  
-  Prefer specific groups or entities actually mentioned in the document.
 
-- Amounts: Monetary values with currency symbols (e.g., "₹10,000", "$500", "€1,200").
+Names:
+- Extract full person names, authors, signatories, and individuals mentioned
+- Examples: "John Smith", "Dr. Sarah Johnson", "Ravi Kumar"
+- Ignore: Job titles alone (e.g., "Manager", "CEO"), pronouns, generic references
+
+Dates:
+- Only extract valid calendar dates (e.g., "June 2020", "2017-03-15", "March 2017", "10 March 2026")
+- Ignore vague terms like "Present", "Current", "Ongoing", "To Date", "Recent", "Soon"
+- Return dates in a consistent readable format: "Month YYYY" or "DD Month YYYY"
+
+Organizations:
+- Extract only real, specific organizations and meaningful organization groups actually named in the document
+- Return only DISTINCT and MEANINGFUL organizations
+- Include:
+  * Companies (e.g., "ABC Pvt Ltd", "Google Inc", "Microsoft Corporation")
+  * Institutions (e.g., "Harvard University", "Red Cross", "World Bank", "Reserve Bank")
+  * Government bodies (e.g., "Ministry of Finance", "FBI", "Reserve Bank of India")
+  * Organization groups (e.g., "financial institutions", "regulatory authorities", "healthcare providers")
+  
+- Do NOT include:
+  * Tools/Software (e.g., "Python", "FastAPI", "Docker", "Tesseract", "PyMuPDF")
+  * Frameworks/Libraries (e.g., "React", "TensorFlow", "pandas", "NumPy")
+  * AI Models (e.g., "GPT-4", "Gemini", "Claude", "ChatGPT")
+  * Programming languages (e.g., "JavaScript", "Python", "Java")
+  * Technologies (e.g., "blockchain", "cloud computing", "machine learning")
+  * Vague terms (e.g., "industry", "sector", "market", "field")
+  * Overly generic or low-value terms (e.g., "companies", "technology companies", "private companies", "organizations")
+  * Generic categories without context (e.g., "companies", "organizations" used generically)
+  
+- Rules for DISTINCT and MEANINGFUL extraction:
+  * Remove duplicates and overlapping terms (e.g., if both "banks" and "financial institutions" appear, keep only the most informative version)
+  * Prefer the most specific and informative version
+  * Exclude overly generic standalone terms unless they are clearly used as meaningful entities in context
+  
+- Adapt extraction based on document type:
+  * Resume/CV → extract specific company/institution names only (e.g., "Google", "Harvard University")
+  * Reports/Articles → include meaningful organization groups (e.g., "regulatory authorities", "financial institutions")
+  * Technical documentation → include only real-world organizations, ignore all tools/frameworks/technologies
+  * Invoices/Receipts → extract company names mentioned (vendors, issuers)
+  
+- General rules:
+  * Include meaningful real-world groups when they represent actual entities or sectors
+  * Extract specific organizational entities actually mentioned in the document
+  * Avoid duplicates and overly generic standalone terms
+  * Prefer named entities over broad categories
+
+Amounts:
+- Extract monetary values with currency symbols (e.g., "₹10,000", "$500.50", "€1,200")
+- Include complete amounts with commas/decimals as written
+- Ignore: Percentages, counts, non-monetary numbers
 
 Sentiment Rules:
-- If the document is factual (resume, CV, report, invoice, receipt, contract, form), return sentiment as "Neutral".
-- Only return "Positive" or "Negative" for opinion-based content (reviews, feedback, letters with emotional tone).
+- If the  document is factual (resume, CV, report, invoice, receipt, contract, form, technical documentation), return sentiment as "Neutral"
+- Only return "Positive" or "Negative" for opinion-based content (reviews, feedback, complaint letters, testimonials with emotional tone)
+- When in doubt, prefer "Neutral" for professional/business documents
 
-Date Rules:
-- Only extract valid calendar dates (e.g., "June 2020", "2017-03-15", "March 2017").
-- Ignore vague terms like "Present", "Current", "Ongoing", "To Date".
-- Return dates in a consistent format: "Month YYYY" or "YYYY-MM-DD".
+Error Handling:
+- If a field cannot be determined, use appropriate default: empty string for summary, empty arrays for entities, "Neutral" for sentiment
+- Do not hallucinate or invent information not present in the document
+- If the document text is unclear or corrupted, still attempt to extract whatever is readable
+- Maintain consistent formatting across all extractions
 
 Document text:
 ---

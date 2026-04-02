@@ -1,3 +1,11 @@
+"""
+DocuMind - AI-Powered Document Analysis API
+
+A FastAPI application that extracts text from PDFs, DOCX, and images,
+then analyzes them using Google Gemini for summarization, entity extraction,
+and sentiment analysis.
+"""
+
 import base64
 import io
 import json
@@ -9,51 +17,81 @@ import pytesseract
 from docx import Document
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import types
 from PIL import Image
 from pydantic import BaseModel
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
 load_dotenv()
 
+# Environment variables
 API_KEY: str = os.getenv("API_KEY", "")
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")  # "production" or "development"
+ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
 
+# Validate required environment variables
 if not API_KEY:
-    raise RuntimeError("API_KEY is not Found")
+    raise RuntimeError("API_KEY is not found. Please set it in .env file")
 if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY is not Found")
+    raise RuntimeError("GEMINI_API_KEY is not found. Please set it in .env file")
 
-# Initialize the new genai client
+# Initialize Google Gemini client
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Model names for fallback (primary: gemini-3.0-flash, fallback: gemini-2.5-flash)
+# Model configuration with fallback
 PRIMARY_MODEL = "gemini-3.0-flash"
 FALLBACK_MODEL = "gemini-2.5-flash"
 
-app = FastAPI(title="AI Document Analysis API", version="1.0.0")
+# Initialize FastAPI application
+app = FastAPI(
+    title="DocuMind API",
+    description="AI-Powered Document Analysis API",
+    version="1.0.0"
+)
 
-# Mount static files for frontend
+# Mount static files for web UI
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
-# ---------------------------------------------------------------------------
-# Request schema
-# ---------------------------------------------------------------------------
+
+# ============================================================================
+# DATA MODELS
+# ============================================================================
+
+
 class DocumentRequest(BaseModel):
+    """Request model for document analysis endpoint."""
     fileName: str
-    fileType: str          # pdf | docx | image
+    fileType: str  # pdf | docx | image
     fileBase64: str
 
-# ---------------------------------------------------------------------------
-# Auth dependency (inline — keeps single-file structure)
-# ---------------------------------------------------------------------------
-def verify_api_key(x_api_key: str = Header(default=None)):
+
+# File extension to type mapping
+EXTENSION_TO_TYPE = {
+    ".pdf": "pdf",
+    ".docx": "docx",
+    ".doc": "docx",
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".tiff": "image",
+    ".bmp": "image",
+    ".webp": "image",
+}
+
+
+# ============================================================================
+# AUTHENTICATION
+# ============================================================================
+
+def verify_api_key(x_api_key: str = Header(default=None)) -> None:
+    """Verify API key from request header."""
     if not x_api_key or x_api_key != API_KEY:
         raise HTTPException(
             status_code=401,
@@ -63,12 +101,28 @@ def verify_api_key(x_api_key: str = Header(default=None)):
             },
         )
 
-# ---------------------------------------------------------------------------
-# Text extraction helpers
-# ---------------------------------------------------------------------------
+
+def is_local_request(request: Request) -> bool:
+    """Check if the request originates from localhost."""
+    client_host = request.client.host if request.client else ""
+    return client_host in ("127.0.0.1", "localhost", "::1")
+
+
+# ============================================================================
+# TEXT EXTRACTION
+# ============================================================================
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
-    """PyMuPDF native extraction; falls back to Tesseract OCR for scanned pages."""
+    """
+    Extract text from PDF using PyMuPDF.
+    Falls back to Tesseract OCR for scanned pages.
+    
+    Args:
+        file_bytes: PDF file content as bytes
+        
+    Returns:
+        Extracted text as string
+    """
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     all_text: list[str] = []
 
@@ -78,7 +132,7 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
         if page_text:
             all_text.append(page_text)
         else:
-            # Scanned page — render and OCR
+            # Scanned page - render and apply OCR
             pix = page.get_pixmap(dpi=300)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             ocr_text = pytesseract.image_to_string(img, config="--psm 6").strip()
@@ -90,11 +144,20 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
 
 
 def extract_text_from_docx(file_bytes: bytes) -> str:
-    """python-docx paragraph extraction preserving reading order."""
+    """
+    Extract text from DOCX files using python-docx.
+    Preserves reading order and includes table content.
+    
+    Args:
+        file_bytes: DOCX file content as bytes
+        
+    Returns:
+        Extracted text as string
+    """
     doc = Document(io.BytesIO(file_bytes))
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
 
-    # Also pull text from tables
+    # Extract text from tables
     for table in doc.tables:
         for row in table.rows:
             row_text = " | ".join(
@@ -107,16 +170,24 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
 
 
 def extract_text_from_image(file_bytes: bytes) -> str:
-    """Tesseract OCR on image bytes."""
+    """
+    Extract text from images using Tesseract OCR.
+    
+    Args:
+        file_bytes: Image file content as bytes
+        
+    Returns:
+        Extracted text as string
+    """
     img = Image.open(io.BytesIO(file_bytes))
     return pytesseract.image_to_string(img, config="--psm 6").strip()
 
 
-# ---------------------------------------------------------------------------
-# Gemini analysis
-# ---------------------------------------------------------------------------
+# ============================================================================
+# AI ANALYSIS WITH GOOGLE GEMINI
+# ============================================================================
 ANALYSIS_PROMPT = """
-You are a professional document analysis engine. Analyse the document text below and respond ONLY with a valid JSON object — no markdown, no backticks, no extra commentary.
+You are a professional document analysis engine. Analyze the document text below and respond ONLY with a valid JSON object — no markdown, no backticks, no extra commentary.
 
 The JSON must follow this exact schema:
 {{
@@ -173,8 +244,16 @@ Document text:
 """
 
 def validate_gemini_response(data: dict) -> dict:
-    """Validate and sanitize Gemini response to match expected schema."""
-    # Ensure top-level keys exist with defaults
+    """
+    Validate and sanitize Gemini API response.
+    Ensures response matches expected schema with proper defaults.
+    
+    Args:
+        data: Raw response dictionary from Gemini
+        
+    Returns:
+        Validated and sanitized response dictionary
+    """
     validated = {
         "summary": "",
         "entities": {
@@ -212,8 +291,20 @@ def validate_gemini_response(data: dict) -> dict:
 
 
 def analyse_with_gemini(text: str) -> dict:
-    """Analyze text with Gemini. Falls back from gemini-3.0-flash to gemini-2.5-flash on errors."""
-    prompt = ANALYSIS_PROMPT.format(text=text[:12000])  # stay within token limits
+    """
+    Analyze document text using Google Gemini API.
+    Implements automatic fallback from primary to secondary model on errors.
+    
+    Args:
+        text: Document text to analyze (truncated to 12000 chars)
+        
+    Returns:
+        Analysis results with summary, entities, and sentiment
+        
+    Raises:
+        Exception: If all models fail to generate valid response
+    """
+    prompt = ANALYSIS_PROMPT.format(text=text[:12000])
     
     models_to_try = [PRIMARY_MODEL, FALLBACK_MODEL]
     last_error = None
@@ -229,33 +320,55 @@ def analyse_with_gemini(text: str) -> dict:
             )
             raw = response.text.strip()
             
-            # Strip accidental markdown fences if model adds them
+            # Clean response: remove markdown code fences if present
             raw = re.sub(r"^```(?:json)?", "", raw).strip()
             raw = re.sub(r"```$", "", raw).strip()
             
             return validate_gemini_response(json.loads(raw))
+            
         except Exception as e:
             last_error = e
             error_str = str(e).lower()
-            # If rate limited or resource exhausted, try fallback
-            if "rate" in error_str or "resource" in error_str or "quota" in error_str or "429" in error_str:
-                continue
-            # For other errors, also try fallback
+            
+            # Check if error is rate limit related
+            if any(keyword in error_str for keyword in ["rate", "resource", "quota", "429"]):
+                continue  # Try fallback model
+                
+            # For other errors, also attempt fallback
             continue
     
-    # All models failed
+    # All models failed - raise the last error
     raise last_error
 
 
-# ---------------------------------------------------------------------------
-# Main endpoint
-# ---------------------------------------------------------------------------
+# ============================================================================
+# API ENDPOINTS
+# ============================================================================
+@app.get("/")
+def root():
+    """Redirect root to web UI."""
+    return RedirectResponse(url="/static/index.html")
+
+
 @app.post("/api/document-analyze")
 async def document_analyze(
     payload: DocumentRequest,
     x_api_key: str = Header(default=None),
 ):
-    # Auth
+    """
+    Main API endpoint for document analysis.
+    Accepts base64-encoded files and returns AI-powered analysis.
+    
+    Args:
+        payload: DocumentRequest with fileName, fileType, and fileBase64
+        x_api_key: API key for authentication (required)
+        
+    Returns:
+        JSON response with summary, entities, and sentiment
+        
+    Raises:
+        HTTPException: For authentication, validation, or processing errors
+    """
     verify_api_key(x_api_key)
 
     # Validate fileType
@@ -330,50 +443,30 @@ async def document_analyze(
     )
 
 
-# ---------------------------------------------------------------------------
-# Health check & Home page
-# ---------------------------------------------------------------------------
-@app.get("/")
-def root():
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/static/index.html")
-
-
-# ---------------------------------------------------------------------------
-# Test endpoint — direct file upload for testing
-# For programmatic access, use /api/document-analyze with base64 JSON body
-# ---------------------------------------------------------------------------
-EXTENSION_TO_TYPE = {
-    ".pdf": "pdf",
-    ".docx": "docx",
-    ".doc": "docx",
-    ".png": "image",
-    ".jpg": "image",
-    ".jpeg": "image",
-    ".tiff": "image",
-    ".bmp": "image",
-    ".webp": "image",
-}
-
-
-def is_local_request(request: Request) -> bool:
-    """Check if request is from localhost."""
-    client_host = request.client.host if request.client else ""
-    return client_host in ("127.0.0.1", "localhost", "::1")
-
-
 @app.post("/api/upload-test")
 async def upload_test(
     request: Request,
     file: UploadFile = File(...),
     x_api_key: str = Header(default=None),
 ):
-    # Check if running locally - if so, skip API key check
-    if ENVIRONMENT != "production" and is_local_request(request):
-        # Local testing - no API key needed
-        pass
-    else:
-        # Production or remote access - verify API key
+    """
+    Test endpoint for direct file upload.
+    Accepts multipart/form-data files for easy testing.
+    API key not required for localhost in development mode.
+    
+    Args:
+        request: FastAPI request object
+        file: Uploaded file
+        x_api_key: API key (optional for localhost in dev mode)
+        
+    Returns:
+        JSON response with analysis results
+        
+    Raises:
+        HTTPException: For authentication, validation, or processing errors
+    """
+    # Check if running locally in development mode
+    if ENVIRONMENT == "production" or not is_local_request(request):
         verify_api_key(x_api_key)
 
     # Detect file type from extension
@@ -390,7 +483,7 @@ async def upload_test(
             },
         )
 
-    # Read file bytes directly — no base64 needed
+    # Read file bytes
     file_bytes = await file.read()
 
     # Extract text

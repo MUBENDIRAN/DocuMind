@@ -1,9 +1,8 @@
 FROM python:3.11-slim
 
-# Install system dependencies (only what you actually need)
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
-    libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

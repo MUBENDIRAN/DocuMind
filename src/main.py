@@ -187,90 +187,62 @@ def extract_text_from_image(file_bytes: bytes) -> str:
 # ============================================================================
 
 ANALYSIS_PROMPT = """
-You are a professional document analysis engine. Analyze the document text below and respond ONLY with a valid JSON object — no markdown, no backticks, no extra commentary.
+You are a document analysis engine. Respond ONLY with valid JSON — no markdown, backticks, or commentary.
 
-The JSON must follow this exact schema:
+Schema:
 {{
-  "summary": "<concise 1-3 sentence summary of the document>",
+  "summary": "<information-dense 2-3 sentence summary>",
   "entities": {{
-    "names": ["<full person names found>"],
-    "dates": ["<all dates found in any format>"],
-    "organizations": ["<company, institution, or organisation names>"],
-    "amounts": ["<monetary values with currency symbols>"]
+    "names": ["<person names>"],
+    "dates": ["<dates in Month YYYY or DD Month YYYY format>"],
+    "organizations": ["<specific companies/institutions>"],
+    "amounts": ["<monetary values with symbols>"]
   }},
   "sentiment": "<Positive | Negative | Neutral>"
 }}
 
-Rules:
-- Extract ALL entities of each type present in the text following the rules below
-- Do NOT return empty lists unless absolutely no entities exist in that category
-- Summary must accurately reflect the document's purpose and key facts
-- Do NOT include any text outside the JSON object
-- Be precise and avoid false positives
+EXTRACTION RULES:
 
-Entity Extraction Rules:
+Summary Requirements (CRITICAL - generic summaries are considered INCORRECT):
+- Include key actors (companies, institutions, people) if mentioned
+- Include 2-3 specific details (technologies, applications, industries, metrics)
+- Mention concrete use cases where applicable (e.g., "healthcare diagnostics", "supply chain optimization")
+- Avoid generic phrases: "various industries", "many sectors", "significant growth" without detail
+- Be concise but information-dense (3 - 4 sentences max)
+- Prefer specific facts over broad statements
+- QUALITY RULE: A weak/generic summary is incorrect even if factually true
 
-Names:
-- Extract full person names, authors, signatories, and individuals mentioned
-- Examples: "John Smith", "Dr. Sarah Johnson", "Ravi Kumar"
-- Ignore: Job titles alone (e.g., "Manager", "CEO"), pronouns, generic references
+Names: Extract full person names only (e.g., "John Smith", "Dr. Sarah Johnson"). Exclude job titles, pronouns.
 
-Dates:
-- Only extract valid calendar dates (e.g., "June 2020", "2017-03-15", "March 2017", "10 March 2026")
-- Ignore vague terms like "Present", "Current", "Ongoing", "To Date", "Recent", "Soon"
-- Return dates in a consistent readable format: "Month YYYY" or "DD Month YYYY"
+Dates: Extract valid calendar dates (e.g., "June 2020", "15 March 2026"). Ignore vague terms ("Present", "Current", "Recent").
 
 Organizations:
-- Extract only real, specific organizations and meaningful organization groups actually named in the document
-- Return only DISTINCT and MEANINGFUL organizations
-- Include:
-  * Companies (e.g., "ABC Pvt Ltd", "Google Inc", "Microsoft Corporation")
-  * Institutions (e.g., "Harvard University", "Red Cross", "World Bank", "Reserve Bank")
-  * Government bodies (e.g., "Ministry of Finance", "FBI", "Reserve Bank of India")
-  * Organization groups (e.g., "financial institutions", "regulatory authorities", "healthcare providers")
-  
-- Do NOT include:
-  * Tools/Software (e.g., "Python", "FastAPI", "Docker", "Tesseract", "PyMuPDF")
-  * Frameworks/Libraries (e.g., "React", "TensorFlow", "pandas", "NumPy")
-  * AI Models (e.g., "GPT-4", "Gemini", "Claude", "ChatGPT")
-  * Programming languages (e.g., "JavaScript", "Python", "Java")
-  * Technologies (e.g., "blockchain", "cloud computing", "machine learning")
-  * Vague terms (e.g., "industry", "sector", "market", "field")
-  * Overly generic or low-value terms (e.g., "companies", "technology companies", "private companies", "organizations")
-  * Generic categories without context (e.g., "companies", "organizations" used generically)
-  
-- Rules for DISTINCT and MEANINGFUL extraction:
-  * Remove duplicates and overlapping terms (e.g., if both "banks" and "financial institutions" appear, keep only the most informative version)
-  * Prefer the most specific and informative version
-  * Exclude overly generic standalone terms unless they are clearly used as meaningful entities in context
-  
-- Adapt extraction based on document type:
-  * Resume/CV → extract specific company/institution names only (e.g., "Google", "Harvard University")
-  * Reports/Articles → include meaningful organization groups (e.g., "regulatory authorities", "financial institutions")
-  * Technical documentation → include only real-world organizations, ignore all tools/frameworks/technologies
-  * Invoices/Receipts → extract company names mentioned (vendors, issuers)
-  
-- General rules:
-  * Include meaningful real-world groups when they represent actual entities or sectors
-  * Extract specific organizational entities actually mentioned in the document
-  * Avoid duplicates and overly generic standalone terms
-  * Prefer named entities over broad categories
+INCLUDE:
+- Specific named entities: "Google Inc", "Harvard University", "FBI", "Reserve Bank of India"
 
-Amounts:
-- Extract monetary values with currency symbols (e.g., "₹10,000", "$500.50", "€1,200")
-- Include complete amounts with commas/decimals as written
-- Ignore: Percentages, counts, non-monetary numbers
+DO NOT INCLUDE:
+- Tech/tools: "Python", "Docker", "React", "TensorFlow", "ChatGPT"
+- Broad/generic groups: "academic institutions", "government agencies", "healthcare professionals"
+- Human roles/professions: "doctors", "engineers", "analysts"
+- Vague terms: "industry", "sector", "market", "companies", "organizations"
+- Low-value ambiguous groups
 
-Sentiment Rules:
-- If the  document is factual (resume, CV, report, invoice, receipt, contract, form, technical documentation), return sentiment as "Neutral"
-- Only return "Positive" or "Negative" for opinion-based content (reviews, feedback, complaint letters, testimonials with emotional tone)
-- When in doubt, prefer "Neutral" for professional/business documents
+STRICT FILTER:
+- Prefer specific named organizations over group terms
+- If named organizations exist, avoid generic group entities
+- Remove duplicates/overlaps (keep most specific)
+- Resume/CV: Named companies/institutions ONLY
+- Reports: Domain-specific groups allowed if meaningful
+- When in doubt, EXCLUDE
 
-Error Handling:
-- If a field cannot be determined, use appropriate default: empty string for summary, empty arrays for entities, "Neutral" for sentiment
-- Do not hallucinate or invent information not present in the document
-- If the document text is unclear or corrupted, still attempt to extract whatever is readable
-- Maintain consistent formatting across all extractions
+Amounts: Extract monetary values with symbols (e.g., "₹10,000", "$500.50"). Ignore percentages.
+
+Sentiment: 
+- Factual docs (resume, report, invoice, contract, technical): "Neutral"
+- Opinion-based (review, feedback, testimonial): "Positive" or "Negative"
+- Default: "Neutral"
+
+Defaults: Empty string for summary, empty arrays for entities, "Neutral" for sentiment if undetermined.
 
 Document text:
 ---

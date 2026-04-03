@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import time
 
 import fitz  # PyMuPDF
 import pytesseract
@@ -33,21 +34,32 @@ load_dotenv()
 
 # Environment variables
 API_KEY: str = os.getenv("API_KEY", "")
-GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEY_1: str = os.getenv("GEMINI_API_KEY_1", "")
+GEMINI_API_KEY_2: str = os.getenv("GEMINI_API_KEY_2", "")
+GEMINI_API_KEY_3: str = os.getenv("GEMINI_API_KEY_3", "")
+GEMINI_API_KEY_4: str = os.getenv("GEMINI_API_KEY_4", "")
 ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
 
 # Validate required environment variables
 if not API_KEY:
     raise RuntimeError("API_KEY is not found. Please set it in .env file")
-if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY is not found. Please set it in .env file")
 
-# Initialize Google Gemini client
-client = genai.Client(api_key=GEMINI_API_KEY)
+# Build list of available Gemini API keys (filter out empty ones)
+GEMINI_API_KEYS = [
+    key for key in [GEMINI_API_KEY_1, GEMINI_API_KEY_2, GEMINI_API_KEY_3, GEMINI_API_KEY_4]
+    if key and key.strip()
+]
+
+if not GEMINI_API_KEYS:
+    raise RuntimeError("No Gemini API keys found. Please set at least GEMINI_API_KEY_1 in .env file")
+
+# Initialize Google Gemini clients for each API key
+gemini_clients = [genai.Client(api_key=key) for key in GEMINI_API_KEYS]
 
 # Model configuration with fallback
-PRIMARY_MODEL = "gemini-3.0-flash"
-FALLBACK_MODEL = "gemini-2.5-flash"
+PRIMARY_MODEL = "gemini-2.5-flash"
+FALLBACK_MODEL = "gemini-1.5-flash"
+MAX_RETRIES = 2  # Keep low to save quota
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -297,55 +309,119 @@ def validate_gemini_response(data: dict) -> dict:
     return validated
 
 
+def fallback_analysis(text: str) -> dict:
+    """
+    Emergency fallback analysis when Gemini API fails.
+    Provides basic extraction using pattern matching.
+    
+    Args:
+        text: Document text to analyze
+        
+    Returns:
+        Basic analysis with minimal entity extraction
+    """
+    # Basic summary from first 200 characters
+    summary = text[:200].strip()
+    if len(text) > 200:
+        summary += "..."
+    if not summary:
+        summary = "Document analysis unavailable due to API limitations."
+    
+    # Basic entity extraction using regex patterns
+    entities = {
+        "names": [],
+        "dates": [],
+        "organizations": [],
+        "amounts": []
+    }
+    
+    # Extract potential names (Title Case patterns)
+    name_pattern = r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b'
+    potential_names = re.findall(name_pattern, text[:3000])
+    entities["names"] = list(set(potential_names[:5]))  # Limit to 5
+    
+    # Extract dates (basic patterns)
+    date_patterns = [
+        r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b',
+        r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\b',
+        r'\b\d{4}\b'  # Year only
+    ]
+    for pattern in date_patterns:
+        dates = re.findall(pattern, text[:3000])
+        entities["dates"].extend(dates[:3])
+    
+    # Extract amounts (currency symbols)
+    amount_pattern = r'[$₹€£¥]\s*[\d,]+(?:\.\d{2})?'
+    amounts = re.findall(amount_pattern, text[:3000])
+    entities["amounts"] = list(set(amounts[:5]))
+    
+    return {
+        "summary": summary,
+        "entities": entities,
+        "sentiment": "Neutral"
+    }
+
+
 def analyse_with_gemini(text: str) -> dict:
     """
-    Analyze document text using Google Gemini API.
-    Implements automatic fallback from primary to secondary model on errors.
+    Analyze document text using Google Gemini API with multi-key rotation.
+    Rotates through multiple API keys if one hits quota limit.
     
     Args:
         text: Document text to analyze (truncated to 12000 chars)
         
     Returns:
         Analysis results with summary, entities, and sentiment
-        
-    Raises:
-        Exception: If all models fail to generate valid response
     """
     prompt = ANALYSIS_PROMPT.format(text=text[:12000])
     
-    models_to_try = [PRIMARY_MODEL, FALLBACK_MODEL]
-    last_error = None
+    # Iterate through all available API keys
+    for key_index, client in enumerate(gemini_clients, 1):
+        
+        # Try both models with current API key
+        for model_name in [PRIMARY_MODEL, FALLBACK_MODEL]:
+            retries = 0
+            
+            while retries < MAX_RETRIES:
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.2,
+                        ),
+                    )
+                    
+                    raw = response.text.strip()
+                    
+                    # Clean response: remove markdown code fences if present
+                    raw = re.sub(r"^```(?:json)?", "", raw).strip()
+                    raw = re.sub(r"```$", "", raw).strip()
+                    
+                    return validate_gemini_response(json.loads(raw))
+                    
+                except Exception as e:
+                    error_str = str(e).lower()
+                    
+                    # ❌ DAILY QUOTA EXHAUSTED → SWITCH TO NEXT API KEY
+                    if "perday" in error_str or "limit" in error_str or "exhausted" in error_str:
+                        break  # Break inner retry loop, move to next model
+                    
+                    # ⚠️ TEMP RATE LIMIT → WAIT & RETRY
+                    if "429" in error_str or "quota" in error_str:
+                        time.sleep(7)
+                        retries += 1
+                        continue
+                    
+                    # Other errors → retry once more
+                    retries += 1
+            
+            # If quota exhausted for this key, skip to next key (don't try other model)
+            if "perday" in error_str or "limit" in error_str or "exhausted" in error_str:
+                break  # Break model loop, move to next API key
     
-    for model_name in models_to_try:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.2,
-                ),
-            )
-            raw = response.text.strip()
-            
-            # Clean response: remove markdown code fences if present
-            raw = re.sub(r"^```(?:json)?", "", raw).strip()
-            raw = re.sub(r"```$", "", raw).strip()
-            
-            return validate_gemini_response(json.loads(raw))
-            
-        except Exception as e:
-            last_error = e
-            error_str = str(e).lower()
-            
-            # Check if error is rate limit related
-            if any(keyword in error_str for keyword in ["rate", "resource", "quota", "429"]):
-                continue  # Try fallback model
-                
-            # For other errors, also attempt fallback
-            continue
-    
-    # All models failed - raise the last error
-    raise last_error
+    # 🚨 FINAL FALLBACK: All API keys and models failed
+    return fallback_analysis(text)
 
 
 # ============================================================================

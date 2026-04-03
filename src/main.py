@@ -52,8 +52,7 @@ FALLBACK_MODEL = "gemini-2.5-flash"
 # Initialize FastAPI application
 app = FastAPI(
     title="DocuMind API",
-    description="AI-Powered Document Analysis API",
-    version="1.0.0"
+    description="AI-Powered Document Analysis API"
 )
 
 # Mount static files for web UI
@@ -186,6 +185,7 @@ def extract_text_from_image(file_bytes: bytes) -> str:
 # ============================================================================
 # AI ANALYSIS WITH GOOGLE GEMINI
 # ============================================================================
+
 ANALYSIS_PROMPT = """
 You are a professional document analysis engine. Analyze the document text below and respond ONLY with a valid JSON object — no markdown, no backticks, no extra commentary.
 
@@ -379,6 +379,7 @@ def analyse_with_gemini(text: str) -> dict:
 # ============================================================================
 # API ENDPOINTS
 # ============================================================================
+
 @app.get("/")
 def root():
     """Redirect root to web UI."""
